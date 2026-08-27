@@ -1,6 +1,9 @@
+extern crate core;
+
 mod command;
 mod influx;
 mod message;
+mod topic_pattern;
 
 use crate::command::{Command, CommandContext};
 use crate::message::Message;
