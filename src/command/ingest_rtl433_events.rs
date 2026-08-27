@@ -1,6 +1,7 @@
 use crate::command::CommandContext;
 use crate::influx;
 use crate::influx::{InfluxOptions, Precision};
+use crate::line_protocol::Point;
 use anyhow::{Context, Result};
 use clap::Args;
 use rumqttc::v5::mqttbytes::QoS;
@@ -52,7 +53,7 @@ pub async fn run(command: IngestRtl433Events, mut context: CommandContext) -> Re
         let payload: MessagePayload = serde_json::from_slice(&message.packet.payload)
             .context("Failed to parse message payload.")?;
 
-        let mut point = influx::Point::new("events");
+        let mut point = Point::new("events");
 
         point
             .add_tag("id", &payload.id.to_string())
@@ -60,11 +61,11 @@ pub async fn run(command: IngestRtl433Events, mut context: CommandContext) -> Re
             .add_tag("protocol", &payload.protocol.to_string());
 
         point
-            .add_float_field("freq1_MHz", payload.freq1)
-            .add_float_field("freq2_MHz", payload.freq2)
-            .add_float_field("rssi_dB", payload.rssi)
-            .add_float_field("snr_dB", payload.snr)
-            .add_float_field("noise_dB", payload.noise);
+            .add_float_field("freq1_MHz", payload.freq1)?
+            .add_float_field("freq2_MHz", payload.freq2)?
+            .add_float_field("rssi_dB", payload.rssi)?
+            .add_float_field("snr_dB", payload.snr)?
+            .add_float_field("noise_dB", payload.noise)?;
 
         let epoch_seconds: f64 = payload.time.parse().context("Failed to parse timestamp.")?;
         point.set_timestamp((epoch_seconds * 1000.0) as i64);

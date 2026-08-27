@@ -1,6 +1,7 @@
 use crate::command::CommandContext;
 use crate::influx;
 use crate::influx::{InfluxOptions, Precision};
+use crate::line_protocol::Point;
 use anyhow::{Context, Result, anyhow};
 use clap::Args;
 use rumqttc::v5::mqttbytes::QoS;
@@ -52,7 +53,7 @@ pub async fn run(command: IngestShellySwitch, mut context: CommandContext) -> Re
             return Ok(());
         };
 
-        let mut point = influx::Point::new("switch");
+        let mut point = Point::new("switch");
 
         let device_name = from_utf8(&message.packet.topic)
             .context("Failed to decode topic")?
@@ -69,10 +70,10 @@ pub async fn run(command: IngestShellySwitch, mut context: CommandContext) -> Re
 
         point
             .add_bool_field("switchedOn", payload.output)
-            .add_float_field("power_W", payload.a_power)
-            .add_float_field("voltage_V", payload.voltage)
-            .add_float_field("current_A", payload.current)
-            .add_float_field("totalEnergy_Wh", payload.a_energy.total);
+            .add_float_field("power_W", payload.a_power)?
+            .add_float_field("voltage_V", payload.voltage)?
+            .add_float_field("current_A", payload.current)?
+            .add_float_field("totalEnergy_Wh", payload.a_energy.total)?;
 
         point.set_timestamp(message.timestamp.timestamp_millis());
 

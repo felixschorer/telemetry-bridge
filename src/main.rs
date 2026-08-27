@@ -2,6 +2,7 @@ extern crate core;
 
 mod command;
 mod influx;
+mod line_protocol;
 mod message;
 mod topic_pattern;
 

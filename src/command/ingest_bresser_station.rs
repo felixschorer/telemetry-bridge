@@ -1,6 +1,7 @@
 use crate::command::CommandContext;
 use crate::influx;
 use crate::influx::{InfluxOptions, Precision};
+use crate::line_protocol::Point;
 use anyhow::{Context, Result};
 use clap::Args;
 use rumqttc::v5::mqttbytes::QoS;
@@ -56,38 +57,38 @@ pub async fn run(command: IngestBresserStation, mut context: CommandContext) -> 
         let payload: MessagePayload = serde_json::from_slice(&message.packet.payload)
             .context("Failed to parse message payload.")?;
 
-        let mut point = influx::Point::new("weather_station");
+        let mut point = Point::new("weather_station");
 
         point
             .add_tag("deviceType", &payload.model)
             .add_tag("deviceName", &payload.id.to_string());
 
         if let Some(temperature) = payload.temperature_c {
-            point.add_float_field("temperature_C", temperature);
+            point.add_float_field("temperature_C", temperature)?;
         }
 
         if let Some(humidity) = payload.humidity {
-            point.add_float_field("humidity_%rel", humidity);
+            point.add_float_field("humidity_%rel", humidity)?;
         }
 
         if let Some(wind_avg) = payload.wind_avg_m_s {
-            point.add_float_field("windAvg_km/h", wind_avg * 3.6);
+            point.add_float_field("windAvg_km/h", wind_avg * 3.6)?;
         }
 
         if let Some(wind_max) = payload.wind_max_m_s {
-            point.add_float_field("windMax_km/h", wind_max * 3.6);
+            point.add_float_field("windMax_km/h", wind_max * 3.6)?;
         }
 
         if let Some(wind_dir) = payload.wind_dir_deg {
-            point.add_float_field("windDirection_deg", wind_dir);
+            point.add_float_field("windDirection_deg", wind_dir)?;
         }
 
         if let Some(rain) = payload.rain_mm {
-            point.add_float_field("totalRain_mm", rain);
+            point.add_float_field("totalRain_mm", rain)?;
         }
 
         if let Some(uv_index) = payload.uvi {
-            point.add_float_field("uvIndex", uv_index);
+            point.add_float_field("uvIndex", uv_index)?;
         }
 
         let epoch_seconds: f64 = payload.time.parse().context("Failed to parse timestamp.")?;
