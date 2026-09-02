@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::f64::consts::PI;
 use std::time::Duration;
 use tokio_stream::{Stream, StreamExt};
 use tracing::info;
@@ -80,6 +81,9 @@ pub async fn run(
     Ok(())
 }
 
+const KMH: f64 = 3.6;
+const RAD: f64 = PI / 180.0;
+
 fn create_point(settings: &Settings, message: TimestampedMessage) -> Result<Point> {
     let payload: WeatherData = serde_json::from_slice(&message.publish.payload)
         .context("Failed to parse message payload.")?;
@@ -103,15 +107,23 @@ fn create_point(settings: &Settings, message: TimestampedMessage) -> Result<Poin
     }
 
     if let Some(wind_avg) = payload.wind_avg_m_s {
-        point.add_float_field("windAvg_km/h", wind_avg * 3.6)?;
+        point.add_float_field("windAvg_km/h", wind_avg * KMH)?;
     }
 
     if let Some(wind_max) = payload.wind_max_m_s {
-        point.add_float_field("windMax_km/h", wind_max * 3.6)?;
+        point.add_float_field("windMax_km/h", wind_max * KMH)?;
     }
 
     if let Some(wind_dir) = payload.wind_dir_deg {
         point.add_float_field("windDirection_deg", wind_dir)?;
+    }
+
+    if let (Some(wind_avg), Some(wind_dir)) = (payload.wind_avg_m_s, payload.wind_dir_deg) {
+        let avg_north = wind_avg * f64::cos(wind_dir * RAD);
+        point.add_float_field("windAvgNorth_km/h", avg_north * KMH)?;
+
+        let avg_east = wind_avg * f64::sin(wind_dir * RAD);
+        point.add_float_field("windAvgEast_km/h", avg_east * KMH)?;
     }
 
     if let Some(rain) = payload.rain_mm {
