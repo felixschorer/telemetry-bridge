@@ -5,17 +5,27 @@ use crate::message::TimestampedMessage;
 use crate::topic_pattern::TopicPattern;
 use anyhow::{Context, Result};
 use itertools::Itertools;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio_stream::{Stream, StreamExt};
 use tracing::info;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Settings {
     pub mqtt_topic: TopicPattern,
 
     pub influx_bucket: String,
     pub influx_measurement: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            mqtt_topic: "rtl433/events/+model/+id".parse().unwrap(),
+            influx_bucket: "rtl433".to_owned(),
+            influx_measurement: "events".to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

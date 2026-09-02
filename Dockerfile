@@ -29,4 +29,6 @@ WORKDIR /app
 RUN adduser -D -u 1000 appuser
 USER appuser
 
-ENTRYPOINT ["./telemetry-bridge"]
+RUN ./telemetry-bridge init > config.toml
+
+ENTRYPOINT ["./telemetry-bridge", "-c=config.toml"]

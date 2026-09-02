@@ -1,18 +1,28 @@
 use anyhow::{Context, Result};
 use rumqttc::v5::AsyncClient;
 use rumqttc::v5::mqttbytes::QoS;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Settings {
     pub topic: String,
     pub message: String,
     pub interval: u64,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            topic: "shellies/command".to_owned(),
+            message: "status_update".to_owned(),
+            interval: 60,
+        }
+    }
 }
 
 pub async fn run(

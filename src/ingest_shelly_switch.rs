@@ -5,13 +5,13 @@ use crate::message::TimestampedMessage;
 use crate::topic_pattern::TopicPattern;
 use anyhow::{Context, Result, anyhow};
 use itertools::Itertools;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio_stream::{Stream, StreamExt};
 use tracing::info;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Settings {
     pub mqtt_topic: TopicPattern,
 
@@ -20,6 +20,17 @@ pub struct Settings {
 
     #[serde(default = "HashMap::new")]
     pub device_names: HashMap<String, String>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            mqtt_topic: "shelly/+type/+id/status/switch:0".parse().unwrap(),
+            influx_bucket: "devices".to_owned(),
+            influx_measurement: "switch".to_owned(),
+            device_names: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -74,15 +85,15 @@ fn create_point(settings: &Settings, message: TimestampedMessage) -> Result<Poin
 
     let device_type = settings
         .mqtt_topic
-        .extract_value(topic, "deviceType")
-        .ok_or_else(|| anyhow!("Failed to extract 'deviceType' wildcard from topic."))?;
+        .extract_value(topic, "type")
+        .ok_or_else(|| anyhow!("Failed to extract 'type' wildcard from topic."))?;
 
     point.add_tag("deviceType", device_type);
 
     let device_id = settings
         .mqtt_topic
-        .extract_value(topic, "deviceId")
-        .ok_or_else(|| anyhow!("Failed to extract 'deviceId' wildcard from topic."))?;
+        .extract_value(topic, "id")
+        .ok_or_else(|| anyhow!("Failed to extract 'id' wildcard from topic."))?;
 
     if let Some(device_name) = settings.device_names.get(device_id) {
         point.add_tag("deviceName", device_name);

@@ -5,13 +5,13 @@ use crate::message::TimestampedMessage;
 use crate::topic_pattern::TopicPattern;
 use anyhow::{Context, Result};
 use itertools::Itertools;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio_stream::{Stream, StreamExt};
 use tracing::info;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Settings {
     pub mqtt_topic: TopicPattern,
 
@@ -20,6 +20,17 @@ pub struct Settings {
 
     #[serde(default = "HashMap::new")]
     pub device_names: HashMap<u64, String>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            mqtt_topic: "rtl433/events/Bresser-6in1/+id".parse().unwrap(),
+            influx_bucket: "devices".to_owned(),
+            influx_measurement: "weather_station".to_owned(),
+            device_names: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

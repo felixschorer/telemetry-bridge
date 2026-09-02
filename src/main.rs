@@ -34,6 +34,15 @@ static GLOBAL: System = System;
 struct Cli {
     #[arg(short)]
     config_file: Option<String>,
+
+    #[clap(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Clone, Debug, Parser)]
+enum Command {
+    Init,
+    Show,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -42,8 +51,27 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let settings = load_settings()?;
+    let cli = Cli::try_parse()?;
 
+    match cli.command {
+        None => {
+            let settings = load_settings(cli.config_file)?;
+            run(settings).await?;
+        }
+        Some(Command::Init) => {
+            let settings = Settings::default();
+            print!("{}", toml::to_string_pretty(&settings)?);
+        }
+        Some(Command::Show) => {
+            let settings = load_settings(cli.config_file)?;
+            print!("{}", toml::to_string_pretty(&settings)?);
+        }
+    }
+
+    Ok(())
+}
+
+async fn run(settings: Settings) -> Result<()> {
     let (mqtt_client, event_loop) = create_mqtt_client(&settings.mqtt);
     let influx_client = influx::Client::try_from(settings.influx)?;
 
@@ -93,12 +121,10 @@ async fn main() -> Result<()> {
     handle_shutdown(tasks, mqtt_client, token).await
 }
 
-fn load_settings() -> Result<Settings> {
-    let cli = Cli::try_parse().context("Failed to parse command line args.")?;
-
+fn load_settings(config_file: Option<String>) -> Result<Settings> {
     let mut config_builder = Config::builder();
 
-    if let Some(file_name) = cli.config_file {
+    if let Some(file_name) = config_file {
         let file_source = File::with_name(&file_name).required(false);
         config_builder = config_builder.add_source(file_source);
     }
