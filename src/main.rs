@@ -1,50 +1,39 @@
 extern crate core;
 
-mod command;
 mod influx;
+mod ingest_bresser_station;
+mod ingest_rtl433_events;
+mod ingest_shelly_switch;
 mod line_protocol;
 mod message;
+mod message_router;
+mod send_periodic_message;
+mod settings;
 mod topic_pattern;
 
-use crate::command::{Command, CommandContext};
-use crate::message::Message;
-use anyhow::{Context, Result, bail};
+use crate::message::TimestampedMessage;
+use crate::message_router::{MessageRouter, MessageRouterBuilder};
+use crate::settings::{MqttSettings, Settings};
+use anyhow::{Context, Result};
 use clap::Parser;
+use config::{Config, Environment, File};
 use rumqttc::Outgoing;
 use rumqttc::v5::{AsyncClient, Event, EventLoop, Incoming, MqttOptions};
 use std::alloc::System;
-use tokio::signal;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::mpsc::error::TrySendError;
-use tracing::{info, warn};
+use tokio::task::JoinSet;
+use tokio::{select, signal};
+use tokio_util::sync::CancellationToken;
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[global_allocator]
 static GLOBAL: System = System;
 
-#[derive(Parser, Debug)]
+#[derive(Clone, Debug, Parser)]
 #[command(name = "telemetry-bridge", version)]
-pub struct Cli {
-    #[command(subcommand)]
-    pub command: Command,
-
-    #[arg(long, env = "TB_MQTT_CLIENT_ID")]
-    pub mqtt_client_id: Option<String>,
-
-    #[arg(long, env = "TB_MQTT_HOST")]
-    pub mqtt_host: String,
-
-    #[arg(long, env = "TB_MQTT_PORT", default_value = "1883")]
-    pub mqtt_port: u16,
-
-    #[arg(long, env = "TB_MQTT_USER")]
-    pub mqtt_user: Option<String>,
-
-    #[arg(long, env = "TB_MQTT_PASSWORD")]
-    pub mqtt_password: Option<String>,
-
-    #[arg(long, env = "TB_MESSAGE_QUEUE_SIZE", default_value = "100")]
-    pub message_queue_size: usize,
+struct Cli {
+    #[arg(short)]
+    config_file: Option<String>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -53,58 +42,103 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let cli = Cli::parse();
+    let settings = load_settings()?;
 
-    let mqtt_client_id = cli
-        .mqtt_client_id
-        .unwrap_or_else(|| format!("telemetry-bridge-{:4x}", rand::random::<u16>()));
+    let (mqtt_client, event_loop) = create_mqtt_client(&settings.mqtt);
+    let influx_client = influx::Client::try_from(settings.influx)?;
 
-    let mut mqtt_options = MqttOptions::new(&mqtt_client_id, &cli.mqtt_host, cli.mqtt_port);
-    if let (Some(user), Some(password)) = (&cli.mqtt_user, &cli.mqtt_password) {
-        mqtt_options.set_credentials(user, password);
+    let mut tasks: JoinSet<Result<()>> = JoinSet::new();
+    let token = CancellationToken::new();
+
+    for settings in settings.send_periodic_message {
+        let fut = send_periodic_message::run(settings.clone(), mqtt_client.clone(), token.clone());
+        tasks.spawn(fut);
     }
 
-    info!("Connecting as {}.", mqtt_client_id);
+    let mut router_builder = MessageRouterBuilder::new(10);
 
-    let (mqtt_client, event_loop) = AsyncClient::new(mqtt_options, 10);
-
-    let (tx, rx) = tokio::sync::mpsc::channel(cli.message_queue_size);
-    let mut driver = tokio::spawn(drive_event_loop(event_loop, tx));
-
-    tokio::select! {
-        driver_res = &mut driver => {
-            driver_res?.context("MQTT connection lost.")?;
-            warn!("MQTT driver exited unexpectedly.");
-            Ok(())
-        }
-        cmd_res = command::run(cli.command, CommandContext::new(mqtt_client.clone(), rx)) => {
-            warn!("Command exited unexpectedly.");
-            mqtt_client.disconnect().await?;
-            let _ = driver.await?;
-            cmd_res
-        }
-        _ = shutdown_signal() => {
-            mqtt_client.disconnect().await?;
-            let _ = driver.await?;
-            Ok(())
-        }
+    if let Some(settings) = settings.ingest_shelly_switch {
+        let messages = router_builder.add_subscriber(&settings.mqtt_topic);
+        let fut = ingest_shelly_switch::run(settings.clone(), messages, influx_client.clone());
+        tasks.spawn(fut);
     }
+
+    if let Some(settings) = settings.ingest_bresser_station {
+        let messages = router_builder.add_subscriber(&settings.mqtt_topic);
+        let fut = ingest_bresser_station::run(settings.clone(), messages, influx_client.clone());
+        tasks.spawn(fut);
+    }
+
+    if let Some(settings) = settings.ingest_rtl433_events {
+        let messages = router_builder.add_subscriber(&settings.mqtt_topic);
+        let fut = ingest_rtl433_events::run(settings.clone(), messages, influx_client.clone());
+        tasks.spawn(fut);
+    }
+
+    let router = router_builder.build();
+
+    info!("Connecting to MQTT as '{}'.", settings.mqtt.client_id);
+    tasks.spawn(drive_event_loop(event_loop, router.clone()));
+
+    router
+        .subscribe(&mqtt_client)
+        .await
+        .context("Failed to subscribe to MQTT topics.")?;
+
+    // `handle_shutdown` relies on the `drive_event_loop` task to hold the only
+    // reference to the channels contained within the `router`.
+    // The ingestion tasks only stop once all references are dropped.
+    drop(router);
+
+    handle_shutdown(tasks, mqtt_client, token).await
 }
 
-async fn drive_event_loop(mut event_loop: EventLoop, message_tx: Sender<Message>) -> Result<()> {
+fn load_settings() -> Result<Settings> {
+    let cli = Cli::try_parse().context("Failed to parse command line args.")?;
+
+    let mut config_builder = Config::builder();
+
+    if let Some(file_name) = cli.config_file {
+        let file_source = File::with_name(&file_name).required(false);
+        config_builder = config_builder.add_source(file_source);
+    }
+
+    let config = config_builder
+        .add_source(Environment::with_prefix("TB").separator("_"))
+        .build()
+        .context("Failed to load configuration.")?;
+
+    let settings: Settings = config
+        .try_deserialize()
+        .context("Failed to parse settings from configuration.")?;
+
+    Ok(settings)
+}
+
+fn create_mqtt_client(settings: &MqttSettings) -> (AsyncClient, EventLoop) {
+    let mut mqtt_options = MqttOptions::new(&settings.client_id, &settings.host, settings.port);
+
+    mqtt_options
+        .set_credentials(&settings.user, &settings.password)
+        .set_clean_start(true);
+
+    AsyncClient::new(mqtt_options, 10)
+}
+
+async fn drive_event_loop(mut event_loop: EventLoop, router: MessageRouter) -> Result<()> {
     loop {
-        match event_loop.poll().await? {
+        let event = event_loop
+            .poll()
+            .await
+            .context("Error polling MQTT connection.")?;
+
+        match event {
             Event::Incoming(Incoming::ConnAck(_)) => {
                 info!("Connected to MQTT broker.");
             }
-            Event::Incoming(Incoming::Publish(packet)) => {
-                let message = Message::with_current_timestamp(packet);
-
-                match message_tx.try_send(message) {
-                    Ok(_) => continue,
-                    Err(TrySendError::Full(_)) => warn!("Dropping message. Channel is full."),
-                    Err(TrySendError::Closed(_)) => bail!("Channel is closed."),
-                }
+            Event::Incoming(Incoming::Publish(publish)) => {
+                let message = TimestampedMessage::at_current_time(publish);
+                router.handle_message(message);
             }
             Event::Outgoing(Outgoing::Disconnect) => {
                 info!("Disconnecting from MQTT broker...");
@@ -112,6 +146,31 @@ async fn drive_event_loop(mut event_loop: EventLoop, message_tx: Sender<Message>
             _ => continue,
         }
     }
+}
+
+async fn handle_shutdown(
+    mut tasks: JoinSet<Result<()>>,
+    mqtt_client: AsyncClient,
+    token: CancellationToken,
+) -> Result<()> {
+    let res = select! {
+        task_result = tasks.join_next() => {
+            match task_result {
+                Some(r) => r.context("Failed to join task.")?,
+                None => Ok(()),
+            }
+        },
+        _ = shutdown_signal() => Ok(()),
+    };
+
+    token.cancel();
+    let _ = mqtt_client.disconnect().await;
+
+    while let Some(task_result) = tasks.join_next().await {
+        let _ = task_result.context("Failed to join task.")?;
+    }
+
+    res
 }
 
 // Source: https://oneuptime.com/blog/post/2026-01-07-rust-graceful-shutdown/view
@@ -125,7 +184,7 @@ async fn shutdown_signal() {
     #[cfg(unix)]
     let terminate = async {
         signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("Failed to install SIGTERM handler")
+            .expect("Failed to install SIGTERM handler.")
             .recv()
             .await;
     };
@@ -133,7 +192,7 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
-    tokio::select! {
+    select! {
         _ = ctrl_c => {
             info!("Received Ctrl+C, initiating shutdown.");
         }

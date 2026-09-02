@@ -1,18 +1,22 @@
-use chrono::{DateTime, Utc};
 use rumqttc::v5::mqttbytes::v5::Publish;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
-pub struct Message {
-    pub timestamp: DateTime<Utc>,
-    pub packet: Publish,
+pub struct TimestampedMessage {
+    pub received_at: u128,
+    pub publish: Publish,
 }
 
-impl Message {
-    pub fn new(timestamp: DateTime<Utc>, packet: Publish) -> Self {
-        Self { timestamp, packet }
-    }
+impl TimestampedMessage {
+    pub fn at_current_time(publish: Publish) -> Self {
+        let received_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Unexpected system time anomaly.")
+            .as_millis();
 
-    pub fn with_current_timestamp(packet: Publish) -> Self {
-        Self::new(Utc::now(), packet)
+        Self {
+            received_at,
+            publish,
+        }
     }
 }

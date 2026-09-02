@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -5,8 +6,6 @@ use thiserror::Error;
 pub enum ProtocolError {
     #[error("Infinity and NaN are not supported.")]
     UnsupportedFloat,
-    #[error("Must have at least one field.")]
-    MissingFields,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -60,7 +59,7 @@ impl Point {
         self
     }
 
-    pub fn to_line(&self) -> Result<String, ProtocolError> {
+    pub fn to_line(&self) -> Option<String> {
         let mut line = String::with_capacity(128);
 
         line.push_str(&self.measurement);
@@ -77,7 +76,7 @@ impl Point {
         let mut fields = self.fields.iter();
 
         let Some((key, value)) = fields.next() else {
-            return Err(ProtocolError::MissingFields);
+            return None;
         };
 
         line.push_str(key);
@@ -96,16 +95,12 @@ impl Point {
             line.push_str(&timestamp.to_string());
         }
 
-        Ok(line)
+        Some(line)
     }
 }
 
-pub fn to_line_protocol(points: Vec<Point>) -> Result<String, ProtocolError> {
-    let mut lines = Vec::with_capacity(points.len());
-    for point in points {
-        lines.push(point.to_line()?)
-    }
-    Ok(lines.join("\n"))
+pub fn to_line_protocol(points: impl IntoIterator<Item = Point>) -> String {
+    points.into_iter().filter_map(|p| p.to_line()).join("\n")
 }
 
 fn escape_measurement(key: &str) -> String {
@@ -185,7 +180,7 @@ mod tests {
     #[test]
     fn test_to_line() {
         let point = Point::new("devices");
-        assert_eq!(point.to_line(), Err(ProtocolError::MissingFields));
+        assert_eq!(point.to_line(), None);
 
         let mut point = Point::new("devices");
 
