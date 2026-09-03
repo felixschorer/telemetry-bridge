@@ -3,7 +3,7 @@ use crate::influx::Precision;
 use crate::line_protocol::Point;
 use crate::message::TimestampedMessage;
 use crate::topic_pattern::TopicPattern;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -31,9 +31,6 @@ impl Default for Settings {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Event {
     time: String,
-
-    id: u64,
-    model: String,
 
     protocol: u64,
 
@@ -72,15 +69,28 @@ pub async fn run(
 }
 
 fn create_point(settings: &Settings, message: TimestampedMessage) -> Result<Point> {
-    let payload: Event = serde_json::from_slice(&message.publish.payload)
-        .context("Failed to parse message payload.")?;
+    let topic = str::from_utf8(&message.publish.topic).context("Failed to decode topic.")?;
 
     let mut point = Point::new(&settings.influx_measurement);
 
-    point
-        .add_tag("id", &payload.id.to_string())
-        .add_tag("model", &payload.model)
-        .add_tag("protocol", &payload.protocol.to_string());
+    let model = settings
+        .mqtt_topic
+        .extract_value(topic, "model")
+        .ok_or_else(|| anyhow!("Failed to extract 'model' wildcard from topic."))?;
+
+    point.add_tag("model", model);
+
+    let id = settings
+        .mqtt_topic
+        .extract_value(topic, "id")
+        .ok_or_else(|| anyhow!("Failed to extract 'id' wildcard from topic."))?;
+
+    point.add_tag("id", id);
+
+    let payload: Event = serde_json::from_slice(&message.publish.payload)
+        .context("Failed to parse message payload.")?;
+
+    point.add_tag("protocol", &payload.protocol.to_string());
 
     point
         .add_float_field("freq1_MHz", payload.freq1)?
