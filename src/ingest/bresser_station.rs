@@ -106,6 +106,11 @@ fn create_point(settings: &Settings, message: TimestampedMessage) -> Result<Poin
         point.add_float_field("humidity_%rel", humidity)?;
     }
 
+    if let (Some(temperature), Some(humidity)) = (payload.temperature_c, payload.humidity) {
+        let dew_point = calculate_dew_point(temperature, humidity);
+        point.add_float_field("dewPoint_C", dew_point)?;
+    }
+
     if let Some(wind_avg) = payload.wind_avg_m_s {
         point.add_float_field("windAvg_km/h", wind_avg * KMH)?;
     }
@@ -138,4 +143,12 @@ fn create_point(settings: &Settings, message: TimestampedMessage) -> Result<Poin
     point.set_timestamp((epoch_seconds * 1000.0) as i64);
 
     Ok(point)
+}
+
+// Source: https://en.wikipedia.org/wiki/Dew_point
+fn calculate_dew_point(temperature: f64, humidity: f64) -> f64 {
+    let b = 17.625;
+    let c = 243.04;
+    let gamma = (humidity / 100.0).ln() + (b * temperature) / (c + temperature);
+    (c * gamma) / (b - gamma)
 }
