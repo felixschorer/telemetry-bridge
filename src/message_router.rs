@@ -30,7 +30,7 @@ impl MessageRouterBuilder {
         &mut self,
         topic_pattern: &TopicPattern,
     ) -> impl Stream<Item = TimestampedMessage> + 'static {
-        let topic_filter = topic_pattern.to_subscription_topic();
+        let topic_filter = topic_pattern.to_topic_filter();
 
         let rx = match self.senders.entry(topic_filter.to_owned()) {
             Entry::Occupied(entry) => entry.get().subscribe(),

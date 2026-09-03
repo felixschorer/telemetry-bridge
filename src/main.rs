@@ -1,14 +1,13 @@
 extern crate core;
 
 mod influx;
-mod ingest_bresser_station;
-mod ingest_rtl433_events;
-mod ingest_shelly_switch;
+mod ingest;
 mod line_protocol;
 mod message;
 mod message_router;
-mod send_periodic_message;
+mod publish_message;
 mod settings;
+mod topic;
 mod topic_pattern;
 
 use crate::message::TimestampedMessage;
@@ -17,6 +16,7 @@ use crate::settings::{MqttSettings, Settings};
 use anyhow::{Context, Result};
 use clap::Parser;
 use config::{Config, Environment, File};
+use ingest::{bresser_station, rtl433_events, shelly_switch};
 use rumqttc::Outgoing;
 use rumqttc::v5::{AsyncClient, Event, EventLoop, Incoming, MqttOptions};
 use std::alloc::System;
@@ -78,29 +78,31 @@ async fn run(settings: Settings) -> Result<()> {
     let mut tasks: JoinSet<Result<()>> = JoinSet::new();
     let token = CancellationToken::new();
 
-    for settings in settings.send_periodic_message {
-        let fut = send_periodic_message::run(settings.clone(), mqtt_client.clone(), token.clone());
+    for settings in settings.publish_messages {
+        let fut = publish_message::run(settings.clone(), mqtt_client.clone(), token.clone());
         tasks.spawn(fut);
     }
 
     let mut router_builder = MessageRouterBuilder::new(10);
 
-    if let Some(settings) = settings.ingest_shelly_switch {
-        let messages = router_builder.add_subscriber(&settings.mqtt_topic);
-        let fut = ingest_shelly_switch::run(settings.clone(), messages, influx_client.clone());
-        tasks.spawn(fut);
-    }
+    if let Some(settings) = settings.ingest {
+        if let Some(settings) = settings.shelly_switch {
+            let messages = router_builder.add_subscriber(&settings.mqtt_topic);
+            let fut = shelly_switch::run(settings.clone(), messages, influx_client.clone());
+            tasks.spawn(fut);
+        }
 
-    if let Some(settings) = settings.ingest_bresser_station {
-        let messages = router_builder.add_subscriber(&settings.mqtt_topic);
-        let fut = ingest_bresser_station::run(settings.clone(), messages, influx_client.clone());
-        tasks.spawn(fut);
-    }
+        if let Some(settings) = settings.bresser_station {
+            let messages = router_builder.add_subscriber(&settings.mqtt_topic);
+            let fut = bresser_station::run(settings.clone(), messages, influx_client.clone());
+            tasks.spawn(fut);
+        }
 
-    if let Some(settings) = settings.ingest_rtl433_events {
-        let messages = router_builder.add_subscriber(&settings.mqtt_topic);
-        let fut = ingest_rtl433_events::run(settings.clone(), messages, influx_client.clone());
-        tasks.spawn(fut);
+        if let Some(settings) = settings.rtl433_events {
+            let messages = router_builder.add_subscriber(&settings.mqtt_topic);
+            let fut = rtl433_events::run(settings.clone(), messages, influx_client.clone());
+            tasks.spawn(fut);
+        }
     }
 
     let router = router_builder.build();

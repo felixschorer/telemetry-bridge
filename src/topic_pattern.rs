@@ -54,7 +54,7 @@ impl TopicPattern {
         }
     }
 
-    pub fn to_subscription_topic(&self) -> String {
+    pub fn to_topic_filter(&self) -> String {
         let mut topic = String::with_capacity(64);
         let _ = self.write(&mut topic, WriteMode::StripNames);
         topic
@@ -278,12 +278,12 @@ mod tests {
     }
 
     #[test]
-    fn test_to_subscription_topic() {
+    fn test_to_topic_filter() {
         let pattern = TopicPattern::from_str("dev/+/+type/+id").unwrap();
-        assert_eq!(pattern.to_subscription_topic(), "dev/+/+/+");
+        assert_eq!(pattern.to_topic_filter(), "dev/+/+/+");
 
         let pattern = TopicPattern::from_str("$share/name/dev/+/+type/+id/#").unwrap();
-        assert_eq!(pattern.to_subscription_topic(), "$share/name/dev/+/+/+/#");
+        assert_eq!(pattern.to_topic_filter(), "$share/name/dev/+/+/+/#");
     }
 
     #[test]

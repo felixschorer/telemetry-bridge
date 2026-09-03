@@ -1,6 +1,4 @@
-use crate::{
-    ingest_bresser_station, ingest_rtl433_events, ingest_shelly_switch, send_periodic_message,
-};
+use crate::{ingest, publish_message};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -9,11 +7,9 @@ pub struct Settings {
     pub mqtt: MqttSettings,
     pub influx: InfluxSettings,
 
-    pub ingest_shelly_switch: Option<ingest_shelly_switch::Settings>,
-    pub ingest_bresser_station: Option<ingest_bresser_station::Settings>,
-    pub ingest_rtl433_events: Option<ingest_rtl433_events::Settings>,
+    pub ingest: Option<ingest::Settings>,
 
-    pub send_periodic_message: Vec<send_periodic_message::Settings>,
+    pub publish_messages: Vec<publish_message::Settings>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -40,11 +36,9 @@ impl Default for Settings {
             mqtt: MqttSettings::default(),
             influx: InfluxSettings::default(),
 
-            ingest_shelly_switch: Some(ingest_shelly_switch::Settings::default()),
-            ingest_bresser_station: Some(ingest_bresser_station::Settings::default()),
-            ingest_rtl433_events: Some(ingest_rtl433_events::Settings::default()),
+            ingest: Some(ingest::Settings::default()),
 
-            send_periodic_message: vec![send_periodic_message::Settings::default()],
+            publish_messages: vec![publish_message::Settings::default()],
         }
     }
 }

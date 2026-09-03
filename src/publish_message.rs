@@ -1,3 +1,4 @@
+use crate::topic::Topic;
 use anyhow::{Context, Result};
 use rumqttc::v5::AsyncClient;
 use rumqttc::v5::mqttbytes::QoS;
@@ -10,7 +11,7 @@ use tracing::info;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Settings {
-    pub topic: String,
+    pub topic: Topic,
     pub message: String,
     pub interval: u64,
 }
@@ -18,7 +19,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            topic: "shellies/command".to_owned(),
+            topic: "shellies/command".parse().unwrap(),
             message: "status_update".to_owned(),
             interval: 60,
         }
@@ -36,7 +37,7 @@ pub async fn run(
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     info!(
-        "Sending message on topic '{}' every {}s.",
+        "Publishing message on topic '{}' every {}s.",
         settings.topic, settings.interval
     );
 
@@ -46,8 +47,8 @@ pub async fn run(
             _ = token.cancelled() => return Ok(())
         }
 
-        let message = settings.message.to_owned();
-        let topic = settings.topic.to_owned();
+        let message = settings.message.clone();
+        let topic = settings.topic.clone();
 
         mqtt_client
             .publish(topic, QoS::AtMostOnce, false, message)
