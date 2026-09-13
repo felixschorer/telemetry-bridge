@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -99,8 +98,21 @@ impl Point {
     }
 }
 
-pub fn to_line_protocol(points: impl IntoIterator<Item = Point>) -> String {
-    points.into_iter().filter_map(|p| p.to_line()).join("\n")
+pub fn to_line_protocol<'a>(points: impl IntoIterator<Item = Point>) -> String {
+    let mut result = String::with_capacity(128);
+
+    let mut lines = points.into_iter().filter_map(|p| p.to_line());
+
+    if let Some(line) = lines.next() {
+        result.push_str(&line);
+    }
+
+    for line in lines {
+        result.push('\n');
+        result.push_str(&line);
+    }
+
+    result
 }
 
 fn escape_measurement(key: &str) -> String {

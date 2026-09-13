@@ -4,7 +4,6 @@ use crate::line_protocol::Point;
 use crate::message::TimestampedMessage;
 use crate::topic_pattern::TopicPattern;
 use anyhow::{Context, Result};
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::f64::consts::PI;
@@ -67,13 +66,13 @@ pub async fn run(
     info!("Starting ingestion on topic '{}'.", settings.mqtt_topic);
 
     while let Some(chunk) = chunked.next().await {
-        let points: Vec<Point> = chunk
+        let points: Result<Vec<Point>> = chunk
             .into_iter()
             .map(|message| create_point(&settings, message))
-            .try_collect()?;
+            .collect();
 
         influx_client
-            .write(&settings.influx_bucket, points, Precision::Millisecond)
+            .write(&settings.influx_bucket, points?, Precision::Millisecond)
             .await
             .context("Failed to write to Influx.")?;
     }
