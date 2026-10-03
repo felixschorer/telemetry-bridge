@@ -132,7 +132,7 @@ impl FromStr for TopicPattern {
 
         loop {
             match segments.next() {
-                Some("$share") if pattern.levels.is_empty() => {
+                Some("$share") if pattern.levels.is_empty() && pattern.share_name.is_none() => {
                     let Some(share_name) = segments.next() else {
                         return Err(ParseError::MissingShareName);
                     };
@@ -251,6 +251,9 @@ mod tests {
 
         let res = TopicPattern::from_str("dev#");
         assert_eq!(res, Err(ParseError::InvalidTopicLevel("dev#".to_owned())));
+
+        let pattern = TopicPattern::from_str("$share/name/$share/other").unwrap();
+        assert_eq!(pattern.to_topic_filter(), "$share/name/$share/other");
     }
 
     #[test]
